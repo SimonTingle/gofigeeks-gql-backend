@@ -10,7 +10,10 @@ export const auth = betterAuth({
 		schema,
 		usePlural: true,
 	}),
-	baseURL: 'http://localhost:4000',
+	secret: process.env.BETTER_AUTH_SECRET,
+	baseURL: process.env.BETTER_AUTH_URL ?? 'http://localhost:4000',
+	trustedOrigins:
+		process.env.TRUSTED_ORIGINS?.split(',').map((o) => o.trim()) ?? [],
 	emailAndPassword: {
 		enabled: true,
 	},
@@ -24,3 +27,9 @@ export const auth = betterAuth({
 		},
 	},
 })
+
+export type AuthSession = Awaited<
+	ReturnType<typeof auth.api.getSession>
+>
+
+export type AuthUser = NonNullable<AuthSession>['user']
