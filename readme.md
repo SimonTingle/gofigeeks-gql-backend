@@ -160,3 +160,83 @@ Una vez tengas una vision general de como funciona, escoge que proyecto deseas i
 - [Better-Auth](https://better-auth.dev/)
 - [GraphQL Yoga](https://the-guild.dev/graphql/yoga-server)
 - [Supabase](https://supabase.com/)
+
+---
+
+# 🐳 Local infra & deployment (TikTok clone)
+
+This implementation runs a **local, self-hostable "supabase-style" stack** instead
+of hosted Supabase: **Postgres** for the database and **MinIO** (S3-compatible) for
+video/thumbnail storage. Uploads go through an S3 client (`@aws-sdk/client-s3`) —
+see `src/contexts/shared/storage.ts`.
+
+## Local development
+
+```bash
+# 1. Start Postgres + MinIO + a public "uploads" bucket + Adminer
+docker compose up -d
+
+# 2. Copy env and (optionally) tweak values
+cp .env.example .env
+
+# 3. Create schema + seed deterministic data (5 users, 40 videos, likes)
+npm run db:generate   # first time / after changing a *.schema.ts
+npm run db:migrate
+npm run db:seed
+
+# 4. Run the API (http://localhost:4000/graphql)
+npm run dev
+```
+
+Services: Postgres `:5432`, MinIO API `:9000`, MinIO console `:9001`
+(`minioadmin`/`minioadmin`), Adminer `:8080`.
+
+Test accounts (password = the part before `@`): `admin@example.com` / `admin`,
+`user@example.com` / `user`.
+
+## Environment variables
+
+See `.env.example`. Storage uses `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
+`S3_BUCKET` and `S3_PUBLIC_URL` (the public base URL objects are served from).
+Auth uses `BETTER_AUTH_SECRET` (≥32 chars in prod: `openssl rand -base64 32`),
+`BETTER_AUTH_URL` and `TRUSTED_ORIGINS` (comma-separated frontend origins for CORS
++ credentialed cookies).
+
+## Testing
+
+```bash
+npm run test    # Vitest against yoga.fetch (no real HTTP server)
+```
+
+## Docker Swarm (smoke test)
+
+```bash
+docker swarm init                       # once
+docker build -t tiktok-backend:latest .
+docker stack deploy -c docker-stack.yml tiktok
+docker service ls
+```
+
+The image runs `drizzle-kit migrate` then boots via `tsx` (so TS path aliases and
+ESM imports resolve exactly as in dev). Override defaults with env vars consumed
+by `docker-stack.yml` (`POSTGRES_PASSWORD`, `BETTER_AUTH_SECRET`,
+`MINIO_ROOT_USER/PASSWORD`, `S3_PUBLIC_URL`, `BACKEND_IMAGE`, …). After deploy,
+seed once: `docker exec <backend-task> npm run db:seed`.
+
+## CapRover
+
+1. **Postgres**: deploy the one-click "PostgreSQL" app. Note its internal
+   host/credentials → build `DATABASE_URL`.
+2. **MinIO**: deploy a MinIO app (or point at any S3 provider). Create a public
+   `uploads` bucket. Enable HTTPS + a domain; `S3_PUBLIC_URL` must be the
+   **externally reachable** URL clients use to load videos.
+3. **Backend**: this repo ships a `captain-definition` (→ `Dockerfile`). Deploy
+   with `caprover deploy` or Git. In the app's **App Configs**, set all env vars
+   (`DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` = the app's HTTPS URL,
+   `TRUSTED_ORIGINS` = frontend origin, and the `S3_*` block). Enable HTTPS and
+   "Websocket Support" (for GraphQL SSE subscriptions).
+4. For production cookies over HTTPS, better-auth issues `Secure`/`SameSite`
+   cookies automatically once `BETTER_AUTH_URL` is an `https://` origin.
+
+> The migrations run on container start, so a fresh deploy provisions its own
+> schema. Run `db:seed` manually only if you want demo data.
